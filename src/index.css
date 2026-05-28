@@ -1,0 +1,27 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-serif: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Manrope", ui-sans-serif, system-ui, sans-serif;
+
+  /* Custom warm earthy coffee palette matching the design guidelines */
+  --color-espresso-950: #1c0f0a;
+  --color-espresso-900: #2b1a13;
+  --color-espresso-800: #3c2a21;
+  --color-espresso-700: #574136;
+  --color-espresso-600: #755a4f;
+  --color-espresso-500: #94776a;
+  --color-espresso-400: #b59b8d;
+  --color-espresso-300: #d1beac;
+  --color-espresso-200: #e8dcc4;
+  --color-espresso-100: #f5eedc;
+  --color-espresso-50: #faf7f0;
+
+  --color-brand-terracotta: #bd5338;
+  --color-brand-amber: #d99136;
+  --color-brand-cream: #faf7f2;
+  --color-brand-charcoal: #1e1b1a;
+  --color-brand-darkcream: #ebdcb9;
+}
