@@ -4,10 +4,14 @@ import AdminLayout from '../pages/admin/AdminLayout';
 import DashboardPage from '../pages/admin/DashboardPage';
 import EmployeesPage from '../pages/admin/EmployeesPage';
 import LocationsPage from '../pages/admin/LocationsPage';
+import ProductSettingsPage from '../pages/admin/ProductSettingsPage';
 import ProductsPage from '../pages/admin/ProductsPage';
 import ReportsPage from '../pages/admin/ReportsPage';
+import RequestsPage from '../pages/admin/RequestsPage';
+import TransfersPage from '../pages/admin/TransfersPage';
 import OpsIndexRedirect from '../pages/ops/OpsIndexRedirect';
 import OpsLayout from '../pages/ops/OpsLayout';
+import OpsRequestsPage from '../pages/ops/OpsRequestsPage';
 import OpsTransfersPage from '../pages/ops/OpsTransfersPage';
 import OpsUsagePage from '../pages/ops/OpsUsagePage';
 import ProtectedRoute from './ProtectedRoute';
@@ -55,6 +59,14 @@ export const router = createBrowserRouter([
             ),
           },
           {
+            path: 'product-settings',
+            element: (
+              <ProtectedRoute ownerOnly>
+                <ProductSettingsPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
             path: 'locations',
             element: (
               <ProtectedRoute ownerOnly>
@@ -67,6 +79,22 @@ export const router = createBrowserRouter([
             element: (
               <ProtectedRoute ownerOnly>
                 <EmployeesPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: 'transfers',
+            element: (
+              <ProtectedRoute ownerOnly>
+                <TransfersPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: 'requests',
+            element: (
+              <ProtectedRoute ownerOnly>
+                <RequestsPage />
               </ProtectedRoute>
             ),
           },
@@ -96,6 +124,10 @@ export const router = createBrowserRouter([
           {
             path: 'transfers',
             element: <OpsTransfersPage />,
+          },
+          {
+            path: 'requests',
+            element: <OpsRequestsPage />,
           },
         ],
       },

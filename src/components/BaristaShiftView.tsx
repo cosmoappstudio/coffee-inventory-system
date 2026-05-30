@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { InventoryItem, Location, Employee, UsageLog, ItemCategory } from '../types';
 import { 
-  Coffee, 
   Sparkles, 
   AlertTriangle, 
   Plus, 
@@ -9,15 +8,9 @@ import {
   Check, 
   X, 
   History, 
-  User, 
-  Layers, 
   FileText, 
-  RotateCcw,
   Search,
-  CheckCircle,
-  Milk,
-  Wine,
-  PackageCheck
+  CheckCircle
 } from 'lucide-react';
 
 interface BaristaShiftViewProps {
@@ -25,6 +18,11 @@ interface BaristaShiftViewProps {
   currentUser: Employee;
   items: InventoryItem[];
   usageLogs: UsageLog[];
+  assignedLocations?: Location[];
+  onSwitchLocation?: (
+    locationId: string,
+    password: string
+  ) => Promise<{ error?: string }>;
   onLogUsage: (itemId: string, quantity: number) => void;
   onUndoUsage: (logId: string) => void;
 }
@@ -34,6 +32,8 @@ export default function BaristaShiftView({
   currentUser,
   items,
   usageLogs,
+  assignedLocations = [],
+  onSwitchLocation,
   onLogUsage,
   onUndoUsage
 }: BaristaShiftViewProps) {
@@ -45,6 +45,10 @@ export default function BaristaShiftView({
   const [logQty, setLogQty] = useState<number>(1);
   const [customQtyInput, setCustomQtyInput] = useState<string>('');
   const [showSuccessToast, setShowSuccessToast] = useState<string | null>(null);
+  const [pendingLocation, setPendingLocation] = useState<Location | null>(null);
+  const [pin, setPin] = useState('');
+  const [pinError, setPinError] = useState<string | null>(null);
+  const [switchingLocation, setSwitchingLocation] = useState(false);
 
   // Filter items for this location
   const locationItems = items.map(item => ({
@@ -85,25 +89,39 @@ export default function BaristaShiftView({
     }, 3000);
   };
 
-  // Icon switcher for categories
-  const getCategoryIcon = (category: ItemCategory) => {
-    switch(category) {
-      case 'Coffee Beans': return <Coffee className="w-5 h-5 text-amber-800" />;
-      case 'Dairy & Alternatives': return <Milk className="w-5 h-5 text-orange-700" />;
-      case 'Syrups': return <Wine className="w-5 h-5 text-yellow-600" />;
-      case 'Disposables': return <Layers className="w-5 h-5 text-stone-600" />;
-      default: return <PackageCheck className="w-5 h-5 text-espresso-700" />;
+  const handleOpenLocationSwitch = (nextLocation: Location) => {
+    if (nextLocation.id === location.id) return;
+    setPendingLocation(nextLocation);
+    setPin('');
+    setPinError(null);
+  };
+
+  const handleConfirmLocationSwitch = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!pendingLocation || !onSwitchLocation) return;
+    setSwitchingLocation(true);
+    setPinError(null);
+    try {
+      const result = await onSwitchLocation(pendingLocation.id, pin);
+      if (result.error) {
+        setPinError(result.error);
+        return;
+      }
+      setPendingLocation(null);
+      setPin('');
+    } finally {
+      setSwitchingLocation(false);
     }
   };
 
   const categories: (ItemCategory | 'All')[] = ['All', 'Coffee Beans', 'Dairy & Alternatives', 'Syrups', 'Disposables'];
 
   return (
-    <div className="w-full space-y-5">
+    <div className="w-full space-y-4 sm:space-y-5">
       {/* Header Info */}
-      <div className="bg-espresso-950 text-espresso-50 p-5 rounded-xl border border-brand-amber/20 overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-          <div>
+      <div className="bg-espresso-950 text-espresso-50 p-4 sm:p-5 rounded-xl border border-brand-amber/20 overflow-hidden">
+        <div className="flex flex-col lg:flex-row justify-between items-stretch lg:items-center gap-4">
+          <div className="min-w-0">
             <div className="flex items-center gap-2">
               <span className="bg-brand-amber/10 text-brand-amber text-[10px] uppercase font-mono px-2 py-0.5 rounded border border-brand-amber/20">
                 Tablet Hızlı Giriş Ekranı
@@ -116,8 +134,29 @@ export default function BaristaShiftView({
               <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
               Aktif Shift Oturumu &bull; {new Date().toLocaleDateString('tr-TR', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })}
             </p>
+            {assignedLocations.length > 1 && (
+              <div className="mt-4 flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+                {assignedLocations.map((assignedLocation) => {
+                  const active = assignedLocation.id === location.id;
+                  return (
+                    <button
+                      key={assignedLocation.id}
+                      type="button"
+                      onClick={() => handleOpenLocationSwitch(assignedLocation)}
+                      className={`min-h-[40px] px-4 rounded-lg text-xs font-bold whitespace-nowrap border cursor-pointer ${
+                        active
+                          ? 'bg-brand-amber text-espresso-950 border-brand-amber'
+                          : 'bg-espresso-900/70 text-espresso-200 border-espresso-800 hover:bg-espresso-800'
+                      }`}
+                    >
+                      {assignedLocation.name}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
-          <div className="flex items-center gap-3 bg-espresso-900/60 px-4 py-2.5 rounded-lg border border-espresso-800">
+          <div className="flex items-center gap-3 bg-espresso-900/60 px-3 sm:px-4 py-2.5 rounded-lg border border-espresso-800 shrink-0">
             <div className="w-9 h-9 rounded-full bg-brand-amber flex items-center justify-center text-espresso-950 font-bold uppercase text-sm">
               {currentUser.name.slice(0, 2)}
             </div>
@@ -159,7 +198,7 @@ export default function BaristaShiftView({
                 </span>
                 <input 
                   type="text"
-                  placeholder="Ürün adı veya kategori ara..."
+                  placeholder="Ürün adı ara..."
                   id="barista-search-input"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
@@ -176,13 +215,12 @@ export default function BaristaShiftView({
                       key={cat}
                       type="button"
                       onClick={() => setSelectedCategory(cat)}
-                      className={`px-4 py-2.5 rounded-lg text-sm font-semibold whitespace-nowrap border transition-all flex items-center gap-1.5 h-11 cursor-pointer select-none ${
+                      className={`px-4 py-2.5 rounded-lg text-sm font-semibold whitespace-nowrap border transition-all h-11 cursor-pointer select-none ${
                         selectedCategory === cat
                           ? 'bg-brand-terracotta border-brand-terracotta text-white shadow-sm'
                           : 'bg-espresso-50 border-espresso-200 text-espresso-700 hover:bg-espresso-100'
                       }`}
                     >
-                      {cat !== 'All' && getCategoryIcon(cat as ItemCategory)}
                       <span>{turkishLabel}</span>
                     </button>
                   );
@@ -202,22 +240,17 @@ export default function BaristaShiftView({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {filteredItems.map((item) => {
                 const isLow = item.isLowStock;
-                const categoryTurkish = item.category === 'Coffee Beans' ? 'Kahve' : item.category === 'Dairy & Alternatives' ? 'Süt & Alternatif' : item.category === 'Syrups' ? 'Şurup' : 'Karton/Bardak';
                 return (
                   <div
                     key={item.id}
-                    className={`rounded-xl border transition-all p-5 flex flex-col justify-between h-48 relative bg-white ${
+                    className={`rounded-xl border transition-all p-4 sm:p-5 flex flex-col justify-between min-h-[168px] relative bg-white ${
                       isLow 
                         ? 'border-brand-amber bg-amber-50/35 ring-1 ring-brand-amber/25 shadow-orange-50/80 shadow-md' 
                         : 'border-espresso-200 shadow-sm hover:shadow-md'
                     }`}
                   >
-                    {/* Corner category tag or warning indicator */}
-                    <div className="flex justify-between items-start">
-                      <span className="text-[11px] font-mono tracking-wider text-espresso-500 uppercase flex items-center gap-1 bg-espresso-100/70 px-2 py-0.5 rounded">
-                        {getCategoryIcon(item.category)}
-                        <span className="truncate max-w-[100px]">{categoryTurkish}</span>
-                      </span>
+                    {/* Warning indicator */}
+                    <div className="flex justify-end min-h-[24px]">
                       {isLow && (
                         <span className="flex items-center gap-1 bg-brand-amber/25 text-amber-950 font-mono uppercase text-[10px] tracking-wider px-2 py-0.5 rounded border border-brand-amber/30 animate-pulse">
                           <AlertTriangle className="w-3.5 h-3.5 text-brand-amber shrink-0" />
@@ -346,7 +379,7 @@ export default function BaristaShiftView({
             {/* Header info */}
             <div>
               <span className="text-[10px] font-mono text-brand-terracotta bg-brand-terracotta/10 px-2.5 py-0.5 rounded font-bold uppercase tracking-wider">
-                {activeItem.category === 'Coffee Beans' ? 'KAHVE' : activeItem.category === 'Dairy & Alternatives' ? 'SÜT & DAIRY' : activeItem.category === 'Syrups' ? 'ŞURUP' : 'KARTON/BARDAK'}
+                Kullanım
               </span>
               <h3 className="text-xl font-bold text-espresso-950 mt-1.5 leading-tight">
                 Kullanım Kaydı
@@ -452,6 +485,56 @@ export default function BaristaShiftView({
               </button>
             </div>
           </div>
+        </div>
+      )}
+      {pendingLocation && (
+        <div className="fixed inset-0 bg-brand-charcoal/80 flex items-center justify-center p-4 z-50 backdrop-blur-xs animate-fadeIn">
+          <form
+            onSubmit={handleConfirmLocationSwitch}
+            className="bg-brand-cream border-2 border-espresso-800 rounded-xl max-w-sm w-full p-5 shadow-xl space-y-4"
+          >
+            <div>
+              <h3 className="text-lg font-bold text-espresso-950">
+                Şube Değiştir
+              </h3>
+              <p className="text-xs text-espresso-600 mt-1">
+                {pendingLocation.name} şubesine geçmek için 5 haneli PIN’inizi girin.
+              </p>
+            </div>
+            <input
+              type="password"
+              inputMode="numeric"
+              maxLength={5}
+              value={pin}
+              onChange={(event) =>
+                setPin(event.target.value.replace(/\D/g, '').slice(0, 5))
+              }
+              placeholder="PIN"
+              className="w-full min-h-[48px] px-3 py-2 rounded-lg border border-espresso-300 bg-white text-center font-mono text-lg tracking-[0.35em]"
+              autoFocus
+            />
+            {pinError && (
+              <p className="text-xs text-red-800 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                {pinError}
+              </p>
+            )}
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setPendingLocation(null)}
+                className="min-h-[44px] px-4 rounded-lg bg-white border border-espresso-300 text-espresso-750 font-semibold text-xs hover:bg-espresso-50 cursor-pointer"
+              >
+                Vazgeç
+              </button>
+              <button
+                type="submit"
+                disabled={switchingLocation || pin.length !== 5}
+                className="min-h-[44px] px-4 rounded-lg bg-brand-terracotta hover:bg-brand-terracotta/95 disabled:opacity-60 text-white font-bold text-xs shadow cursor-pointer"
+              >
+                {switchingLocation ? 'Kontrol ediliyor…' : 'Şubeye Geç'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </div>

@@ -1,8 +1,11 @@
 import type {
   Employee,
+  BranchRequest,
   InventoryItem,
   ItemCategory,
   Location,
+  ProductCategory,
+  ProductUnit,
   StockTransfer,
   TransferItem,
   UsageLog,
@@ -38,6 +41,7 @@ export type DbEmployee = {
   location_id: string | null;
   status: Employee['status'];
   email: string;
+  employee_locations?: { location_id: string }[];
 };
 
 export type DbTransferItem = {
@@ -67,6 +71,38 @@ export type DbUsageLog = {
   timestamp: string;
 };
 
+export type DbProductCategory = {
+  id: string;
+  name: string;
+  description: string | null;
+  sort_order: number | null;
+  active: boolean | null;
+};
+
+export type DbProductUnit = {
+  id: string;
+  label: string;
+  category: string | null;
+  sort_order: number | null;
+  active: boolean | null;
+};
+
+export type DbBranchRequest = {
+  id: string;
+  location_id: string;
+  requested_by: string | null;
+  title: string;
+  description: string;
+  priority: BranchRequest['priority'];
+  status: BranchRequest['status'];
+  created_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  resolution_note: string | null;
+  completed_at: string | null;
+  completed_by: string | null;
+};
+
 export function mapLocation(row: DbLocation): Location {
   return {
     id: row.id,
@@ -77,11 +113,20 @@ export function mapLocation(row: DbLocation): Location {
 }
 
 export function mapEmployee(row: DbEmployee): Employee {
+  const assignedLocationIds = (row.employee_locations ?? []).map(
+    (assignment) => assignment.location_id
+  );
+  const locationId = row.location_id ?? assignedLocationIds[0] ?? 'all';
+
   return {
     id: row.id,
     name: row.name,
     role: row.role,
-    locationId: row.location_id ?? 'all',
+    locationId,
+    locationIds:
+      row.role === 'Owner'
+        ? ['all']
+        : Array.from(new Set([locationId, ...assignedLocationIds])),
     status: row.status,
     email: row.email,
   };
@@ -144,5 +189,43 @@ export function mapUsageLog(
     itemId: row.item_id,
     quantityUsed: Number(row.quantity_used),
     loggedBy,
+  };
+}
+
+export function mapProductCategory(row: DbProductCategory): ProductCategory {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description ?? undefined,
+    sortOrder: row.sort_order ?? 0,
+    active: row.active ?? true,
+  };
+}
+
+export function mapProductUnit(row: DbProductUnit): ProductUnit {
+  return {
+    id: row.id,
+    label: row.label,
+    category: row.category ?? undefined,
+    sortOrder: row.sort_order ?? 0,
+    active: row.active ?? true,
+  };
+}
+
+export function mapBranchRequest(row: DbBranchRequest): BranchRequest {
+  return {
+    id: row.id,
+    locationId: row.location_id,
+    requestedBy: row.requested_by ?? '',
+    title: row.title,
+    description: row.description,
+    priority: row.priority,
+    status: row.status,
+    createdAt: row.created_at,
+    resolvedAt: row.resolved_at ?? undefined,
+    resolvedBy: row.resolved_by ?? undefined,
+    resolutionNote: row.resolution_note ?? undefined,
+    completedAt: row.completed_at ?? undefined,
+    completedBy: row.completed_by ?? undefined,
   };
 }

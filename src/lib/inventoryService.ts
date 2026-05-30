@@ -1,21 +1,32 @@
 import { employeeAuthEmail, isSupabaseConfigured, supabase } from './supabase';
 import {
   buildInventoryItems,
+  mapBranchRequest,
   mapEmployee,
   mapLocation,
+  mapProductCategory,
+  mapProductUnit,
   mapStockTransfer,
   mapUsageLog,
   type DbEmployee,
+  type DbBranchRequest,
   type DbInventory,
   type DbItem,
+  type DbProductCategory,
+  type DbProductUnit,
   type DbStockTransfer,
   type DbUsageLog,
 } from './mappers';
 import type {
   Employee,
+  BranchRequest,
+  BranchRequestPriority,
+  BranchRequestStatus,
   InventoryItem,
   ItemCategory,
   Location,
+  ProductCategory,
+  ProductUnit,
   StockTransfer,
   TransferStatus,
   UsageLog,
@@ -25,7 +36,9 @@ import type {
 export async function fetchLocations(): Promise<Location[]> {
   const { data, error } = await supabase.from('locations').select('*').order('name');
   if (error) throw error;
-  return (data ?? []).map(mapLocation);
+  return (data ?? [])
+    .filter((row) => row.id !== 'supplier')
+    .map(mapLocation);
 }
 
 export async function fetchItemsBundle(): Promise<InventoryItem[]> {
@@ -43,7 +56,10 @@ export async function fetchItemsBundle(): Promise<InventoryItem[]> {
 }
 
 export async function fetchEmployees(): Promise<Employee[]> {
-  const { data, error } = await supabase.from('employees').select('*').order('name');
+  const { data, error } = await supabase
+    .from('employees')
+    .select('*, employee_locations(location_id)')
+    .order('name');
   if (error) throw error;
   return ((data ?? []) as DbEmployee[]).map(mapEmployee);
 }
@@ -69,6 +85,35 @@ export async function fetchUsageLogs(
   return ((data ?? []) as DbUsageLog[]).map((row) =>
     mapUsageLog(row, employeeNameById)
   );
+}
+
+export async function fetchBranchRequests(): Promise<BranchRequest[]> {
+  const { data, error } = await supabase
+    .from('branch_requests')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return ((data ?? []) as DbBranchRequest[]).map(mapBranchRequest);
+}
+
+export async function fetchProductCategories(): Promise<ProductCategory[]> {
+  const { data, error } = await supabase
+    .from('product_categories')
+    .select('*')
+    .order('sort_order', { ascending: true })
+    .order('name', { ascending: true });
+  if (error) throw error;
+  return ((data ?? []) as DbProductCategory[]).map(mapProductCategory);
+}
+
+export async function fetchProductUnits(): Promise<ProductUnit[]> {
+  const { data, error } = await supabase
+    .from('product_units')
+    .select('*')
+    .order('sort_order', { ascending: true })
+    .order('label', { ascending: true });
+  if (error) throw error;
+  return ((data ?? []) as DbProductUnit[]).map(mapProductUnit);
 }
 
 export async function updateInventoryQuantity(
@@ -110,13 +155,17 @@ export async function createTransferRecord(params: {
   items: { itemId: string; quantity: number }[];
   notes?: string;
   createdByEmployeeId: string;
+  status?: Extract<
+    TransferStatus,
+    'Pending Approval' | 'Approved - Awaiting Fulfillment'
+  >;
 }): Promise<void> {
   const { data: transfer, error: transferError } = await supabase
     .from('stock_transfers')
     .insert({
       source_location_id: params.sourceLocationId,
       destination_location_id: params.destinationLocationId,
-      status: 'Pending Approval',
+      status: params.status ?? 'Pending Approval',
       notes: params.notes ?? null,
       created_by: params.createdByEmployeeId,
     })
@@ -231,6 +280,107 @@ export async function updateEmployeeStatus(
   if (error) throw error;
 }
 
+export type BranchRequestPayload = {
+  locationId: string;
+  requestedBy: string;
+  title: string;
+  description: string;
+  priority: BranchRequestPriority;
+};
+
+export async function createBranchRequest(
+  payload: BranchRequestPayload
+): Promise<void> {
+  const { error } = await supabase.from('branch_requests').insert({
+    location_id: payload.locationId,
+    requested_by: payload.requestedBy,
+    title: payload.title,
+    description: payload.description,
+    priority: payload.priority,
+  });
+  if (error) throw error;
+}
+
+export async function updateBranchRequestStatus(
+  requestId: string,
+  status: BranchRequestStatus,
+  resolvedBy: string,
+  resolutionNote?: string
+): Promise<void> {
+  const { error } = await supabase
+    .from('branch_requests')
+    .update({
+      status,
+      resolved_by: resolvedBy,
+      resolved_at: new Date().toISOString(),
+      resolution_note: resolutionNote ?? null,
+    })
+    .eq('id', requestId);
+  if (error) throw error;
+}
+
+export async function completeBranchRequest(
+  requestId: string,
+  completedBy: string
+): Promise<void> {
+  const { error } = await supabase
+    .from('branch_requests')
+    .update({
+      status: 'Completed',
+      completed_by: completedBy,
+      completed_at: new Date().toISOString(),
+    })
+    .eq('id', requestId);
+  if (error) throw error;
+}
+
+export type ProductCategoryPayload = {
+  name: string;
+  description?: string;
+  sortOrder?: number;
+};
+
+export async function createProductCategory(
+  payload: ProductCategoryPayload
+): Promise<void> {
+  const { error } = await supabase.from('product_categories').insert({
+    name: payload.name.trim(),
+    description: payload.description?.trim() || null,
+    sort_order: payload.sortOrder ?? 0,
+  });
+  if (error) throw error;
+}
+
+export async function deleteProductCategory(categoryId: string): Promise<void> {
+  const { error } = await supabase
+    .from('product_categories')
+    .delete()
+    .eq('id', categoryId);
+  if (error) throw error;
+}
+
+export type ProductUnitPayload = {
+  label: string;
+  category?: string;
+  sortOrder?: number;
+};
+
+export async function createProductUnit(
+  payload: ProductUnitPayload
+): Promise<void> {
+  const { error } = await supabase.from('product_units').insert({
+    label: payload.label.trim(),
+    category: payload.category?.trim() || null,
+    sort_order: payload.sortOrder ?? 0,
+  });
+  if (error) throw error;
+}
+
+export async function deleteProductUnit(unitId: string): Promise<void> {
+  const { error } = await supabase.from('product_units').delete().eq('id', unitId);
+  if (error) throw error;
+}
+
 export async function deleteEmployee(employeeId: string): Promise<void> {
   const { error } = await supabase.from('employees').delete().eq('id', employeeId);
   if (error) throw error;
@@ -241,6 +391,7 @@ export type CreateEmployeePayload = {
   name: string;
   role: Employee['role'];
   locationId: string;
+  locationIds?: string[];
   password: string;
 };
 
@@ -248,6 +399,7 @@ export type UpdateEmployeePayload = {
   name: string;
   role: Employee['role'];
   locationId: string;
+  locationIds?: string[];
   status: Employee['status'];
   password?: string;
 };

@@ -49,7 +49,12 @@ export default function LocationsPage() {
   const employeeCountByLocation = useMemo(() => {
     const counts = new Map<string, number>();
     for (const employee of employees) {
-      counts.set(employee.locationId, (counts.get(employee.locationId) ?? 0) + 1);
+      const locationIds =
+        employee.locationIds?.filter((locationId) => locationId !== 'all') ??
+        [employee.locationId];
+      for (const locationId of locationIds) {
+        counts.set(locationId, (counts.get(locationId) ?? 0) + 1);
+      }
     }
     return counts;
   }, [employees]);

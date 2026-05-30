@@ -17,6 +17,7 @@ import {
 
 const AUTH_INIT_TIMEOUT_MS = 6000;
 const AUTH_REQUEST_TIMEOUT_MS = 20000;
+const ACTIVE_LOCATION_STORAGE_PREFIX = 'immersion-active-location:';
 
 type AuthContextValue = {
   employee: Employee | null;
@@ -27,17 +28,39 @@ type AuthContextValue = {
     employeeId: string,
     password: string
   ) => Promise<{ error?: string; role?: Role }>;
+  switchLocationWithPin: (
+    locationId: string,
+    password: string
+  ) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 function mapEmployeeRow(row: EmployeeRow): Employee {
+  const assignedLocationIds = (row.employee_locations ?? []).map(
+    (assignment) => assignment.location_id
+  );
+  const storedActive =
+    typeof window !== 'undefined'
+      ? window.localStorage.getItem(`${ACTIVE_LOCATION_STORAGE_PREFIX}${row.id}`)
+      : null;
+  const fallbackLocationId = row.location_id ?? assignedLocationIds[0] ?? 'all';
+  const locationIds =
+    row.role === 'Owner'
+      ? ['all']
+      : Array.from(new Set([fallbackLocationId, ...assignedLocationIds]));
+  const activeLocationId =
+    storedActive && locationIds.includes(storedActive)
+      ? storedActive
+      : fallbackLocationId;
+
   return {
     id: row.id,
     name: row.name,
     role: row.role,
-    locationId: row.location_id ?? 'all',
+    locationId: activeLocationId,
+    locationIds,
     status: row.status,
     email: row.email,
   };
@@ -46,7 +69,7 @@ function mapEmployeeRow(row: EmployeeRow): Employee {
 async function fetchEmployeeByAuthId(authId: string): Promise<Employee | null> {
   const { data, error } = await supabase
     .from('employees')
-    .select('id, auth_id, name, role, location_id, status, email')
+    .select('id, auth_id, name, role, location_id, status, email, employee_locations(location_id)')
     .eq('auth_id', authId)
     .maybeSingle();
 
@@ -235,6 +258,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setEmployee(null);
   }, []);
 
+  const switchLocationWithPin = useCallback(
+    async (
+      nextLocationId: string,
+      password: string
+    ): Promise<{ error?: string }> => {
+      if (!employee) return { error: 'Oturum bulunamadı.' };
+      if (!employee.locationIds?.includes(nextLocationId)) {
+        return { error: 'Bu şubeye atanmış değilsiniz.' };
+      }
+      if (!/^\d{5}$/.test(password)) {
+        return { error: 'PIN 5 haneli olmalıdır.' };
+      }
+
+      const { error } = await supabase.auth.signInWithPassword({
+        email: employeeAuthEmail(employee.id),
+        password,
+      });
+      if (error) return { error: 'PIN hatalı.' };
+
+      window.localStorage.setItem(
+        `${ACTIVE_LOCATION_STORAGE_PREFIX}${employee.id}`,
+        nextLocationId
+      );
+      setEmployee((prev) =>
+        prev ? { ...prev, locationId: nextLocationId } : prev
+      );
+      return {};
+    },
+    [employee]
+  );
+
   const value = useMemo<AuthContextValue>(
     () => ({
       employee,
@@ -242,9 +296,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       locationId: employee?.locationId ?? null,
       loading,
       signIn,
+      switchLocationWithPin,
       signOut,
     }),
-    [employee, loading, signIn, signOut]
+    [employee, loading, signIn, switchLocationWithPin, signOut]
   );
 
   return (

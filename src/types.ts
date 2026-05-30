@@ -5,7 +5,13 @@ export type TransferStatus =
   | 'Approved - Awaiting Fulfillment'
   | 'Approved & Completed'
   | 'Declined';
-export type ItemCategory = 'Coffee Beans' | 'Dairy & Alternatives' | 'Syrups' | 'Disposables' | 'Retail';
+export type BranchRequestStatus =
+  | 'Pending Approval'
+  | 'Approved'
+  | 'Completed'
+  | 'Declined';
+export type BranchRequestPriority = 'Low' | 'Normal' | 'High' | 'Urgent';
+export type ItemCategory = string;
 
 export interface Location {
   id: string; // e.g. 'dt', 'np', 'ob', 'lj', 'li', 'warehouse'
@@ -21,6 +27,22 @@ export interface InventoryItem {
   unit: string; // 'kg', 'carton', 'bottle', 'box (100pcs)'
   quantities: Record<string, number>; // locationId -> current stock level
   minStock: Record<string, number>; // locationId -> low stock warning threshold
+}
+
+export interface ProductCategory {
+  id: string;
+  name: string;
+  description?: string;
+  sortOrder: number;
+  active: boolean;
+}
+
+export interface ProductUnit {
+  id: string;
+  label: string;
+  category?: string;
+  sortOrder: number;
+  active: boolean;
 }
 
 export interface TransferItem {
@@ -45,6 +67,7 @@ export interface Employee {
   name: string;
   role: Role;
   locationId: string; // 'all' for Owner, or specific Location ID
+  locationIds?: string[];
   status: UserStatus;
   email: string;
   lastActive?: string;
@@ -57,4 +80,20 @@ export interface UsageLog {
   itemId: string;
   quantityUsed: number;
   loggedBy: string;
+}
+
+export interface BranchRequest {
+  id: string;
+  locationId: string;
+  requestedBy: string;
+  title: string;
+  description: string;
+  priority: BranchRequestPriority;
+  status: BranchRequestStatus;
+  createdAt: string;
+  resolvedAt?: string;
+  resolvedBy?: string;
+  resolutionNote?: string;
+  completedAt?: string;
+  completedBy?: string;
 }

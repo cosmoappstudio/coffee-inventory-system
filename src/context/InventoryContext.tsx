@@ -11,25 +11,38 @@ import { useI18n } from './I18nContext';
 import { useToast } from './ToastContext';
 import {
   createEmployeeViaApi,
+  createBranchRequest,
+  completeBranchRequest,
   createLocationViaApi,
+  createProductCategory,
   createProductViaApi,
+  createProductUnit,
   createTransferRecord,
+  deleteProductCategory,
   deleteLocationViaApi,
   deleteProductViaApi,
+  deleteProductUnit,
   deleteEmployee,
   deleteUsageLog,
   fetchEmployees,
+  fetchBranchRequests,
   fetchItemsBundle,
   fetchLocations,
+  fetchProductCategories,
+  fetchProductUnits,
   fetchTransfers,
   fetchUsageLogs,
   getAccessToken,
   getConfigError,
   insertUsageLog,
   type LocationPayload,
+  type BranchRequestPayload,
   type ProductPayload,
+  type ProductCategoryPayload,
+  type ProductUnitPayload,
   type UpdateEmployeePayload,
   updateEmployeeStatus,
+  updateBranchRequestStatus,
   updateEmployeeViaApi,
   updateInventoryQuantity,
   updateLocationViaApi,
@@ -39,8 +52,12 @@ import {
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import type {
   Employee,
+  BranchRequest,
+  BranchRequestStatus,
   InventoryItem,
   Location,
+  ProductCategory,
+  ProductUnit,
   StockTransfer,
   TransferStatus,
   UsageLog,
@@ -54,6 +71,9 @@ type InventoryContextValue = {
   items: InventoryItem[];
   employees: Employee[];
   transfers: StockTransfer[];
+  branchRequests: BranchRequest[];
+  productCategories: ProductCategory[];
+  productUnits: ProductUnit[];
   usageLogs: UsageLog[];
   refresh: () => Promise<void>;
   logUsage: (itemId: string, quantity: number, locationId: string) => Promise<void>;
@@ -74,6 +94,13 @@ type InventoryContextValue = {
     >,
     updaterName: string
   ) => Promise<void>;
+  createRequest: (payload: BranchRequestPayload) => Promise<void>;
+  updateRequestStatus: (
+    requestId: string,
+    status: BranchRequestStatus,
+    resolutionNote?: string
+  ) => Promise<void>;
+  completeRequest: (requestId: string) => Promise<void>;
   addEmployee: (employee: Employee, password: string) => Promise<void>;
   updateEmployee: (
     employeeId: string,
@@ -87,6 +114,10 @@ type InventoryContextValue = {
     product: Omit<ProductPayload, 'id'>
   ) => Promise<void>;
   deleteProduct: (itemId: string) => Promise<void>;
+  addProductCategory: (category: ProductCategoryPayload) => Promise<void>;
+  removeProductCategory: (categoryId: string) => Promise<void>;
+  addProductUnit: (unit: ProductUnitPayload) => Promise<void>;
+  removeProductUnit: (unitId: string) => Promise<void>;
   createLocation: (location: LocationPayload) => Promise<void>;
   updateLocation: (
     locationId: string,
@@ -110,6 +141,9 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [transfers, setTransfers] = useState<StockTransfer[]>([]);
+  const [branchRequests, setBranchRequests] = useState<BranchRequest[]>([]);
+  const [productCategories, setProductCategories] = useState<ProductCategory[]>([]);
+  const [productUnits, setProductUnits] = useState<ProductUnit[]>([]);
   const [usageLogs, setUsageLogs] = useState<UsageLog[]>([]);
 
   const loadAll = useCallback(async () => {
@@ -123,11 +157,22 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
     setLoading(true);
     setError(null);
     try {
-      const [locData, itemData, empData, transferData] = await Promise.all([
+      const [
+        locData,
+        itemData,
+        empData,
+        transferData,
+        requestData,
+        categoryData,
+        unitData,
+      ] = await Promise.all([
         fetchLocations(),
         fetchItemsBundle(),
         fetchEmployees(),
         fetchTransfers(),
+        fetchBranchRequests(),
+        fetchProductCategories(),
+        fetchProductUnits(),
       ]);
 
       const nameMap = new Map(empData.map((e) => [e.id, e.name]));
@@ -137,6 +182,9 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
       setItems(itemData);
       setEmployees(empData);
       setTransfers(transferData);
+      setBranchRequests(requestData);
+      setProductCategories(categoryData);
+      setProductUnits(unitData);
       setUsageLogs(logData);
     } catch (err) {
       const message =
@@ -253,9 +301,17 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
           })),
           notes: draft.notes,
           createdByEmployeeId: currentUser.id,
+          status:
+            currentUser.role === 'Owner'
+              ? 'Approved - Awaiting Fulfillment'
+              : 'Pending Approval',
         });
         await loadAll();
-        showSuccess(t('Transfer talebi oluşturuldu.'));
+        showSuccess(
+          currentUser.role === 'Owner'
+            ? t('Gönderim hedef şubeye bildirildi.')
+            : t('Transfer talebi oluşturuldu.')
+        );
       } catch (err) {
         showError(err instanceof Error ? err.message : t('Transfer oluşturulamadı.'));
       }
@@ -296,6 +352,62 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
     [currentUser, loadAll, showError, showSuccess, t]
   );
 
+  const createRequest = useCallback(
+    async (payload: BranchRequestPayload) => {
+      try {
+        await createBranchRequest(payload);
+        await loadAll();
+        showSuccess(t('Talep yönetime gönderildi.'));
+      } catch (err) {
+        showError(err instanceof Error ? err.message : t('Talep oluşturulamadı.'));
+      }
+    },
+    [loadAll, showError, showSuccess, t]
+  );
+
+  const updateRequestStatus = useCallback(
+    async (
+      requestId: string,
+      status: BranchRequestStatus,
+      resolutionNote?: string
+    ) => {
+      if (!currentUser) return;
+      try {
+        await updateBranchRequestStatus(
+          requestId,
+          status,
+          currentUser.id,
+          resolutionNote
+        );
+        await loadAll();
+        showSuccess(
+          status === 'Approved'
+            ? t('Talep onaylandı.')
+            : t('Talep reddedildi.')
+        );
+      } catch (err) {
+        showError(err instanceof Error ? err.message : t('Talep güncellenemedi.'));
+      }
+    },
+    [currentUser, loadAll, showError, showSuccess, t]
+  );
+
+  const completeRequest = useCallback(
+    async (requestId: string) => {
+      if (!currentUser) return;
+      try {
+        await completeBranchRequest(requestId, currentUser.id);
+        await loadAll();
+        showSuccess(t('Talep gerçekleşti olarak işaretlendi.'));
+      } catch (err) {
+        showError(
+          err instanceof Error ? err.message : t('Talep gerçekleştirilemedi.')
+        );
+      }
+    },
+    [currentUser, loadAll, showError, showSuccess, t]
+  );
+
   const addEmployee = useCallback(
     async (newStaff: Employee, password: string) => {
       const token = await getAccessToken();
@@ -315,6 +427,12 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
                 : newStaff.locationId === 'all'
                   ? 'dt'
                   : newStaff.locationId,
+            locationIds:
+              newStaff.role === 'Owner'
+                ? []
+                : newStaff.locationIds?.length
+                  ? newStaff.locationIds
+                  : [newStaff.locationId],
             password,
           },
           token
@@ -447,6 +565,68 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
     [loadAll, showError, showSuccess, t]
   );
 
+  const addProductCategory = useCallback(
+    async (category: ProductCategoryPayload) => {
+      try {
+        await createProductCategory(category);
+        await loadAll();
+        showSuccess(t('Kategori eklendi.'));
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : t('Kategori eklenemedi.');
+        showError(message);
+        throw new Error(message);
+      }
+    },
+    [loadAll, showError, showSuccess, t]
+  );
+
+  const removeProductCategory = useCallback(
+    async (categoryId: string) => {
+      try {
+        await deleteProductCategory(categoryId);
+        await loadAll();
+        showSuccess(t('Kategori silindi.'));
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : t('Kategori silinemedi.');
+        showError(message);
+        throw new Error(message);
+      }
+    },
+    [loadAll, showError, showSuccess, t]
+  );
+
+  const addProductUnit = useCallback(
+    async (unit: ProductUnitPayload) => {
+      try {
+        await createProductUnit(unit);
+        await loadAll();
+        showSuccess(t('Birim eklendi.'));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : t('Birim eklenemedi.');
+        showError(message);
+        throw new Error(message);
+      }
+    },
+    [loadAll, showError, showSuccess, t]
+  );
+
+  const removeProductUnit = useCallback(
+    async (unitId: string) => {
+      try {
+        await deleteProductUnit(unitId);
+        await loadAll();
+        showSuccess(t('Birim silindi.'));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : t('Birim silinemedi.');
+        showError(message);
+        throw new Error(message);
+      }
+    },
+    [loadAll, showError, showSuccess, t]
+  );
+
   const createLocation = useCallback(
     async (location: LocationPayload) => {
       const token = await getAccessToken();
@@ -521,6 +701,9 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
       items,
       employees,
       transfers,
+      branchRequests,
+      productCategories,
+      productUnits,
       usageLogs,
       refresh: loadAll,
       logUsage,
@@ -528,6 +711,9 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
       modifyProductQuantity,
       createTransfer,
       updateTransferStatus: handleUpdateTransferStatus,
+      createRequest,
+      updateRequestStatus,
+      completeRequest,
       addEmployee,
       updateEmployee,
       removeEmployee,
@@ -535,6 +721,10 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
       createProduct,
       updateProduct,
       deleteProduct,
+      addProductCategory,
+      removeProductCategory,
+      addProductUnit,
+      removeProductUnit,
       createLocation,
       updateLocation,
       deleteLocation,
@@ -546,6 +736,9 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
       items,
       employees,
       transfers,
+      branchRequests,
+      productCategories,
+      productUnits,
       usageLogs,
       loadAll,
       logUsage,
@@ -553,6 +746,9 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
       modifyProductQuantity,
       createTransfer,
       handleUpdateTransferStatus,
+      createRequest,
+      updateRequestStatus,
+      completeRequest,
       addEmployee,
       updateEmployee,
       removeEmployee,
@@ -560,6 +756,10 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
       createProduct,
       updateProduct,
       deleteProduct,
+      addProductCategory,
+      removeProductCategory,
+      addProductUnit,
+      removeProductUnit,
       createLocation,
       updateLocation,
       deleteLocation,

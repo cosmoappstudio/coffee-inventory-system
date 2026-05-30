@@ -8,6 +8,9 @@ import {
   PackagePlus,
   Users,
   BarChart3,
+  ArrowRightLeft,
+  ClipboardList,
+  SlidersHorizontal,
 } from 'lucide-react';
 import LanguageSelector from '../../components/LanguageSelector';
 import { useAuth } from '../../context/AuthContext';
@@ -34,9 +37,27 @@ const NAV_ITEMS: NavItem[] = [
     roles: ['Owner'],
   },
   {
+    to: '/admin/product-settings',
+    label: 'Ürün Ayarları',
+    icon: <SlidersHorizontal className="w-4 h-4" />,
+    roles: ['Owner'],
+  },
+  {
     to: '/admin/locations',
     label: 'Lokasyonlar',
     icon: <Building2 className="w-4 h-4" />,
+    roles: ['Owner'],
+  },
+  {
+    to: '/admin/transfers',
+    label: 'Transferler',
+    icon: <ArrowRightLeft className="w-4 h-4" />,
+    roles: ['Owner'],
+  },
+  {
+    to: '/admin/requests',
+    label: 'Talepler',
+    icon: <ClipboardList className="w-4 h-4" />,
     roles: ['Owner'],
   },
   {

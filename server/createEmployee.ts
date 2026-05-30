@@ -5,6 +5,7 @@ export type CreateEmployeeBody = {
   name: string;
   role: 'Owner' | 'Location Manager' | 'Barista';
   locationId: string;
+  locationIds?: string[];
   password: string;
 };
 
@@ -12,6 +13,7 @@ export type UpdateEmployeeBody = {
   name: string;
   role: 'Owner' | 'Location Manager' | 'Barista';
   locationId: string;
+  locationIds?: string[];
   status: 'Active' | 'On Leave' | 'Inactive';
   password?: string;
 };
@@ -26,6 +28,41 @@ export type UpdateEmployeeResult =
 
 function employeeAuthEmail(employeeId: string): string {
   return `${employeeId.trim().toLowerCase()}@immersion.internal`;
+}
+
+function normalizeLocationIds(
+  role: CreateEmployeeBody['role'],
+  locationId: string,
+  locationIds?: string[]
+): string[] {
+  if (role === 'Owner') return [];
+  return Array.from(
+    new Set([locationId, ...(locationIds ?? [])].filter(Boolean))
+  );
+}
+
+async function replaceEmployeeLocations(
+  adminClient: SupabaseClient,
+  employeeId: string,
+  locationIds: string[]
+) {
+  const { error: deleteError } = await adminClient
+    .from('employee_locations')
+    .delete()
+    .eq('employee_id', employeeId);
+  if (deleteError) return deleteError;
+
+  if (locationIds.length === 0) return null;
+
+  const { error: insertError } = await adminClient
+    .from('employee_locations')
+    .insert(
+      locationIds.map((assignedLocationId) => ({
+        employee_id: employeeId,
+        location_id: assignedLocationId,
+      }))
+    );
+  return insertError;
 }
 
 async function requireOwner(userClient: SupabaseClient) {
@@ -60,7 +97,7 @@ export async function handleCreateEmployee(
   userClient: SupabaseClient,
   body: CreateEmployeeBody
 ): Promise<CreateEmployeeResult> {
-  const { id, name, role, locationId, password } = body;
+  const { id, name, role, locationId, locationIds, password } = body;
 
   if (!id || !name || !role || !password) {
     return { ok: false, status: 400, error: 'Eksik alanlar.' };
@@ -74,7 +111,8 @@ export async function handleCreateEmployee(
   if (owner.ok === false) return owner;
 
   const email = employeeAuthEmail(id);
-  const dbLocationId = role === 'Owner' ? null : locationId;
+  const assignments = normalizeLocationIds(role, locationId, locationIds);
+  const dbLocationId = role === 'Owner' ? null : assignments[0] ?? locationId;
 
   const { data: authUser, error: authError } =
     await adminClient.auth.admin.createUser({
@@ -106,6 +144,17 @@ export async function handleCreateEmployee(
     return { ok: false, status: 400, error: insertError.message };
   }
 
+  const assignmentError = await replaceEmployeeLocations(
+    adminClient,
+    id,
+    assignments
+  );
+  if (assignmentError) {
+    await adminClient.from('employees').delete().eq('id', id);
+    await adminClient.auth.admin.deleteUser(authUser.user.id);
+    return { ok: false, status: 400, error: assignmentError.message };
+  }
+
   return {
     ok: true,
     employee: {
@@ -113,6 +162,7 @@ export async function handleCreateEmployee(
       name: employee.name,
       role: employee.role,
       locationId: employee.location_id ?? 'all',
+      locationIds: employee.role === 'Owner' ? ['all'] : assignments,
       status: employee.status,
       email: employee.email,
     },
@@ -125,7 +175,7 @@ export async function handleUpdateEmployee(
   employeeId: string,
   body: UpdateEmployeeBody
 ): Promise<UpdateEmployeeResult> {
-  const { name, role, locationId, status, password } = body;
+  const { name, role, locationId, locationIds, status, password } = body;
 
   if (!employeeId || !name || !role || !status) {
     return { ok: false, status: 400, error: 'Eksik alanlar.' };
@@ -158,7 +208,8 @@ export async function handleUpdateEmployee(
     }
   }
 
-  const dbLocationId = role === 'Owner' ? null : locationId;
+  const assignments = normalizeLocationIds(role, locationId, locationIds);
+  const dbLocationId = role === 'Owner' ? null : assignments[0] ?? locationId;
   const { data: employee, error: updateError } = await adminClient
     .from('employees')
     .update({
@@ -175,6 +226,15 @@ export async function handleUpdateEmployee(
     return { ok: false, status: 400, error: updateError.message };
   }
 
+  const assignmentError = await replaceEmployeeLocations(
+    adminClient,
+    employeeId,
+    assignments
+  );
+  if (assignmentError) {
+    return { ok: false, status: 400, error: assignmentError.message };
+  }
+
   return {
     ok: true,
     employee: {
@@ -182,6 +242,7 @@ export async function handleUpdateEmployee(
       name: employee.name,
       role: employee.role,
       locationId: employee.location_id ?? 'all',
+      locationIds: employee.role === 'Owner' ? ['all'] : assignments,
       status: employee.status,
       email: employee.email,
     },

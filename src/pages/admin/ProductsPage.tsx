@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   AlertTriangle,
   Archive,
@@ -17,7 +17,7 @@ import { useI18n } from '../../context/I18nContext';
 import PageSkeleton from '../../components/ui/PageSkeleton';
 import type { InventoryItem, ItemCategory } from '../../types';
 
-const CATEGORY_OPTIONS: { value: ItemCategory; label: string; hint: string }[] = [
+const DEFAULT_CATEGORY_OPTIONS: { value: ItemCategory; label: string; hint: string }[] = [
   {
     value: 'Coffee Beans',
     label: 'Coffee Beans',
@@ -45,7 +45,7 @@ const CATEGORY_OPTIONS: { value: ItemCategory; label: string; hint: string }[] =
   },
 ];
 
-const UNIT_OPTIONS_BY_CATEGORY: Record<ItemCategory, string[]> = {
+const DEFAULT_UNIT_OPTIONS_BY_CATEGORY: Record<string, string[]> = {
   'Coffee Beans': [
     'bags (1kg)',
     'bags (5lb)',
@@ -125,7 +125,7 @@ const EMPTY_FORM: FormState = {
   id: '',
   name: '',
   category: 'Coffee Beans',
-  unit: UNIT_OPTIONS_BY_CATEGORY['Coffee Beans'][0],
+  unit: DEFAULT_UNIT_OPTIONS_BY_CATEGORY['Coffee Beans'][0],
   policy: '15',
   minStock: '15',
   initialStock: '0',
@@ -156,8 +156,16 @@ function slugifyProductId(name: string): string {
 }
 
 export default function ProductsPage() {
-  const { loading, locations, items, createProduct, updateProduct, deleteProduct } =
-    useInventory();
+  const {
+    loading,
+    locations,
+    items,
+    productCategories,
+    productUnits,
+    createProduct,
+    updateProduct,
+    deleteProduct,
+  } = useInventory();
   const { t } = useI18n();
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [locationStock, setLocationStock] = useState<LocationStockForm>({});
@@ -174,6 +182,82 @@ export default function ProductsPage() {
     () => items.find((item) => item.id === selectedItemId) ?? null,
     [items, selectedItemId]
   );
+
+  const categoryOptions = useMemo(() => {
+    const configured = productCategories
+      .filter((category) => category.active)
+      .map((category) => ({
+        value: category.name,
+        label: category.name,
+        hint: category.description ?? 'Özel kategori',
+      }));
+    const baseOptions =
+      configured.length > 0 ? configured : DEFAULT_CATEGORY_OPTIONS;
+    const seen = new Set(baseOptions.map((category) => category.value));
+    const itemCategories = Array.from(new Set(items.map((item) => item.category)))
+      .filter((category) => !seen.has(category))
+      .map((category) => ({
+        value: category,
+        label: category,
+        hint: 'Mevcut ürün kategorisi',
+      }));
+
+    return [...baseOptions, ...itemCategories];
+  }, [items, productCategories]);
+
+  const getUnitOptionsForCategory = useCallback(
+    (category: ItemCategory) => {
+      const configuredUnits = productUnits.filter((unit) => unit.active);
+      if (configuredUnits.length > 0) {
+        const scopedUnits = configuredUnits
+          .filter((unit) => !unit.category || unit.category === category)
+          .map((unit) => unit.label);
+        const existingItemUnits = items
+          .filter((item) => item.category === category)
+          .map((item) => item.unit);
+        const combined = Array.from(new Set([...scopedUnits, ...existingItemUnits]));
+        if (combined.length > 0) return combined;
+      }
+
+      return (
+        DEFAULT_UNIT_OPTIONS_BY_CATEGORY[category] ??
+        Array.from(
+          new Set([
+            ...Object.values(DEFAULT_UNIT_OPTIONS_BY_CATEGORY).flat(),
+            ...items.map((item) => item.unit),
+          ])
+        )
+      );
+    },
+    [items, productUnits]
+  );
+
+  const unitOptionsForForm = useMemo(
+    () => getUnitOptionsForCategory(form.category),
+    [form.category, getUnitOptionsForCategory]
+  );
+
+  useEffect(() => {
+    if (selectedItemId !== 'new') return;
+
+    setForm((prev) => {
+      const categoryIsValid = categoryOptions.some(
+        (category) => category.value === prev.category
+      );
+      const nextCategory = categoryIsValid
+        ? prev.category
+        : categoryOptions[0]?.value ?? prev.category;
+      const nextUnitOptions = getUnitOptionsForCategory(nextCategory);
+      const nextUnit = nextUnitOptions.includes(prev.unit)
+        ? prev.unit
+        : nextUnitOptions[0] ?? prev.unit;
+
+      if (nextCategory === prev.category && nextUnit === prev.unit) {
+        return prev;
+      }
+      return { ...prev, category: nextCategory, unit: nextUnit };
+    });
+  }, [categoryOptions, getUnitOptionsForCategory, selectedItemId]);
 
   const buildLocationStockForm = (
     item?: InventoryItem,
@@ -239,8 +323,15 @@ export default function ProductsPage() {
 
   if (loading) return <PageSkeleton />;
 
+  const getEmptyForm = () => {
+    const category = categoryOptions[0]?.value ?? EMPTY_FORM.category;
+    const unit = getUnitOptionsForCategory(category)[0] ?? EMPTY_FORM.unit;
+    return { ...EMPTY_FORM, category, unit };
+  };
+
   const resetForm = () => {
-    setForm(EMPTY_FORM);
+    const nextForm = getEmptyForm();
+    setForm(nextForm);
     setLocationStock(buildLocationStockForm(undefined, Number(EMPTY_FORM.minStock)));
     setSelectedItemId('new');
     setError(null);
@@ -269,7 +360,7 @@ export default function ProductsPage() {
   };
 
   const handleCategoryChange = (category: ItemCategory) => {
-    const unitOptions = UNIT_OPTIONS_BY_CATEGORY[category];
+    const unitOptions = getUnitOptionsForCategory(category);
     setForm((prev) => ({
       ...prev,
       category,
@@ -542,13 +633,11 @@ export default function ProductsPage() {
               />
               <select
                 value={categoryFilter}
-                onChange={(e) =>
-                  setCategoryFilter(e.target.value as ItemCategory | 'All')
-                }
+                onChange={(e) => setCategoryFilter(e.target.value)}
                 className="px-3 py-2 rounded-lg border border-espresso-200 text-xs bg-white"
               >
                 <option value="All">Tüm kategoriler</option>
-                {CATEGORY_OPTIONS.map((category) => (
+                {categoryOptions.map((category) => (
                   <option key={category.value} value={category.value}>
                     {category.label}
                   </option>
@@ -651,12 +740,10 @@ export default function ProductsPage() {
                 <div className="relative">
                   <select
                     value={form.category}
-                    onChange={(e) =>
-                      handleCategoryChange(e.target.value as ItemCategory)
-                    }
+                    onChange={(e) => handleCategoryChange(e.target.value)}
                     className="w-full appearance-none px-3 py-2.5 pr-9 rounded-lg border border-espresso-200 bg-white text-xs font-bold"
                   >
-                    {CATEGORY_OPTIONS.map((category) => (
+                    {categoryOptions.map((category) => (
                       <option key={category.value} value={category.value}>
                         {category.label} — {category.hint}
                       </option>
@@ -678,7 +765,7 @@ export default function ProductsPage() {
                     }
                     className="w-full appearance-none px-3 py-2.5 pr-9 rounded-lg border border-espresso-200 bg-white text-xs font-bold"
                   >
-                    {UNIT_OPTIONS_BY_CATEGORY[form.category].map((unit) => (
+                    {unitOptionsForForm.map((unit) => (
                       <option key={unit} value={unit}>
                         {unit}
                       </option>

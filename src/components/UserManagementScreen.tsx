@@ -30,6 +30,7 @@ interface UserManagementScreenProps {
       name: string;
       role: Role;
       locationId: string;
+      locationIds?: string[];
       status: UserStatus;
       password?: string;
     }
@@ -54,7 +55,7 @@ export default function UserManagementScreen({
   const [showModal, setShowModal] = useState(false);
   const [newUserName, setNewUserName] = useState('');
   const [newUserRole, setNewUserRole] = useState<Role>('Barista');
-  const [newUserLoc, setNewUserLoc] = useState<string>('dt');
+  const [newUserLocs, setNewUserLocs] = useState<string[]>([]);
   const [newUserPassword, setNewUserPassword] = useState('');
   const [generatedId, setGeneratedId] = useState('');
 
@@ -64,7 +65,7 @@ export default function UserManagementScreen({
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [editName, setEditName] = useState('');
   const [editRole, setEditRole] = useState<Role>('Barista');
-  const [editLocationId, setEditLocationId] = useState('');
+  const [editLocationIds, setEditLocationIds] = useState<string[]>([]);
   const [editStatus, setEditStatus] = useState<UserStatus>('Active');
   const [editPassword, setEditPassword] = useState('');
   const [editError, setEditError] = useState<string | null>(null);
@@ -76,13 +77,26 @@ export default function UserManagementScreen({
     return `IMM-${num}`;
   };
 
+  const storeLocations = locations.filter((location) => !location.isWarehouse);
+
+  const toggleLocation = (
+    locationId: string,
+    setSelectedLocationIds: React.Dispatch<React.SetStateAction<string[]>>
+  ) => {
+    setSelectedLocationIds((prev) =>
+      prev.includes(locationId)
+        ? prev.filter((id) => id !== locationId)
+        : [...prev, locationId]
+    );
+  };
+
   const handleOpenCreateModal = () => {
     setGeneratedId(generateEmployeeId());
     setNewUserName('');
     setNewUserRole('Barista');
     
     const firstStore = locations.find(l => !l.isWarehouse);
-    setNewUserLoc(firstStore ? firstStore.id : 'dt');
+    setNewUserLocs(firstStore ? [firstStore.id] : []);
     setNewUserPassword(String(Math.floor(10000 + Math.random() * 90000)));
     setModalError(null);
     setShowModal(true);
@@ -98,12 +112,17 @@ export default function UserManagementScreen({
       setModalError('Şifre tam 5 haneli rakam olmalıdır.');
       return;
     }
+    if (newUserRole !== 'Owner' && newUserLocs.length === 0) {
+      setModalError('Owner dışındaki roller için en az bir şube seçilmelidir.');
+      return;
+    }
 
     const created: Employee = {
       id: generatedId,
       name: newUserName.trim(),
       role: newUserRole,
-      locationId: newUserRole === 'Owner' ? 'all' : newUserLoc,
+      locationId: newUserRole === 'Owner' ? 'all' : newUserLocs[0],
+      locationIds: newUserRole === 'Owner' ? ['all'] : newUserLocs,
       status: 'Active',
       email: employeeAuthEmail(generatedId),
       lastActive: 'Never active (New)'
@@ -128,10 +147,16 @@ export default function UserManagementScreen({
     setEditingEmployee(employee);
     setEditName(employee.name);
     setEditRole(employee.role);
-    setEditLocationId(
-      employee.locationId === 'all'
-        ? firstStore?.id ?? ''
-        : employee.locationId
+    setEditLocationIds(
+      employee.role === 'Owner'
+        ? []
+        : employee.locationIds?.length
+          ? employee.locationIds
+          : employee.locationId === 'all'
+            ? firstStore
+              ? [firstStore.id]
+              : []
+            : [employee.locationId]
     );
     setEditStatus(employee.status);
     setEditPassword('');
@@ -147,8 +172,8 @@ export default function UserManagementScreen({
       return;
     }
 
-    if (editRole !== 'Owner' && !editLocationId) {
-      setEditError('Owner dışındaki roller için şube seçimi zorunludur.');
+    if (editRole !== 'Owner' && editLocationIds.length === 0) {
+      setEditError('Owner dışındaki roller için en az bir şube seçilmelidir.');
       return;
     }
 
@@ -163,7 +188,8 @@ export default function UserManagementScreen({
       await onUpdateEmployee(editingEmployee.id, {
         name: editName.trim(),
         role: editRole,
-        locationId: editRole === 'Owner' ? 'all' : editLocationId,
+        locationId: editRole === 'Owner' ? 'all' : editLocationIds[0],
+        locationIds: editRole === 'Owner' ? [] : editLocationIds,
         status: editStatus,
         ...(editPassword ? { password: editPassword } : {}),
       });
@@ -293,7 +319,11 @@ export default function UserManagementScreen({
                 </tr>
               ) : (
                 filteredEmployees.map((emp) => {
-                  const locationObj = locations.find(l => l.id === emp.locationId);
+                  const assignedLocations = locations.filter((location) =>
+                    (emp.locationIds?.length ? emp.locationIds : [emp.locationId]).includes(
+                      location.id
+                    )
+                  );
                   const isSystemSelf = emp.id === 'IMM-8012'; // Keep owner self from being deleted as safeguards
 
                   return (
@@ -331,9 +361,11 @@ export default function UserManagementScreen({
                         <div className="flex items-center gap-1">
                           <MapPin className="w-4 h-4 text-espresso-400" />
                           <span>
-                            {emp.role === 'Owner' 
-                              ? 'Tüm Şubeler (Merkez)' 
-                              : (locationObj ? locationObj.name : emp.locationId || 'Atanmamış')}
+                            {emp.role === 'Owner'
+                              ? 'Tüm Şubeler (Merkez)'
+                              : assignedLocations.length > 0
+                                ? assignedLocations.map((loc) => loc.name).join(', ')
+                                : emp.locationId || 'Atanmamış'}
                           </span>
                         </div>
                       </td>
@@ -501,20 +533,24 @@ export default function UserManagementScreen({
                 {/* Location Assignment selector */}
                 <div>
                   <label className="block text-[11px] font-mono font-bold uppercase tracking-wide text-espresso-600 mb-1">
-                    Atanacağı Şube
+                    Atanacağı Şubeler
                   </label>
-                  <select
-                    value={newUserLoc}
-                    disabled={newUserRole === 'Owner'}
-                    onChange={(e) => setNewUserLoc(e.target.value)}
-                    className="w-full px-3 py-1.5 bg-white border border-espresso-250 rounded text-xs font-semibold focus:ring-1 focus:ring-brand-terracotta focus:outline-none disabled:bg-espresso-100 disabled:text-espresso-450 cursor-pointer"
-                  >
-                    {locations.filter(l => !l.isWarehouse).map(loc => (
-                      <option key={`assign-${loc.id}`} value={loc.id}>
+                  <div className={`rounded-lg border border-espresso-250 bg-white p-2 space-y-1 max-h-32 overflow-y-auto ${newUserRole === 'Owner' ? 'opacity-60 pointer-events-none' : ''}`}>
+                    {storeLocations.map((loc) => (
+                      <label
+                        key={`assign-${loc.id}`}
+                        className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-espresso-50 text-xs font-semibold cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={newUserLocs.includes(loc.id)}
+                          onChange={() => toggleLocation(loc.id, setNewUserLocs)}
+                          className="accent-brand-terracotta"
+                        />
                         {loc.name}
-                      </option>
+                      </label>
                     ))}
-                  </select>
+                  </div>
                   {newUserRole === 'Owner' && (
                     <p className="text-[10px] text-brand-terracotta font-mono mt-1">Yöneticiler otomatik olarak tüm şubelerde yetkilidir.</p>
                   )}
@@ -647,20 +683,24 @@ export default function UserManagementScreen({
 
                 <div>
                   <label className="block text-[11px] font-mono font-bold uppercase tracking-wide text-espresso-600 mb-1">
-                    Atandığı Şube
+                    Atandığı Şubeler
                   </label>
-                  <select
-                    value={editLocationId}
-                    disabled={editRole === 'Owner'}
-                    onChange={(e) => setEditLocationId(e.target.value)}
-                    className="min-h-[44px] w-full px-3 py-2 bg-white border border-espresso-250 rounded-lg text-sm font-semibold focus:ring-1 focus:ring-brand-terracotta focus:outline-none disabled:bg-espresso-100 disabled:text-espresso-450 cursor-pointer"
-                  >
-                    {locations.filter(l => !l.isWarehouse).map(loc => (
-                      <option key={`edit-assign-${loc.id}`} value={loc.id}>
+                  <div className={`rounded-lg border border-espresso-250 bg-white p-2 space-y-1 max-h-36 overflow-y-auto ${editRole === 'Owner' ? 'opacity-60 pointer-events-none' : ''}`}>
+                    {storeLocations.map((loc) => (
+                      <label
+                        key={`edit-assign-${loc.id}`}
+                        className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-espresso-50 text-xs font-semibold cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={editLocationIds.includes(loc.id)}
+                          onChange={() => toggleLocation(loc.id, setEditLocationIds)}
+                          className="accent-brand-terracotta"
+                        />
                         {loc.name}
-                      </option>
+                      </label>
                     ))}
-                  </select>
+                  </div>
                   {editRole === 'Owner' && (
                     <p className="text-[10px] text-brand-terracotta font-mono mt-1">
                       Owner için şube ataması “Tüm Şubeler” olarak saklanır.

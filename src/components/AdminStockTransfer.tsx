@@ -26,6 +26,7 @@ interface AdminStockTransferProps {
   lockedSourceId?: string;
   lockedDestinationId?: string;
   allowApprovals?: boolean;
+  allowCreate?: boolean;
   onCreateTransfer: (transfer: Omit<StockTransfer, 'id' | 'createdAt' | 'status'>) => void;
   onUpdateTransferStatus: (
     transferId: string,
@@ -45,12 +46,13 @@ export default function AdminStockTransfer({
   lockedSourceId,
   lockedDestinationId,
   allowApprovals = true,
+  allowCreate = true,
   onCreateTransfer,
   onUpdateTransferStatus
 }: AdminStockTransferProps) {
   const { t } = useI18n();
   // Transfer Creator Form State
-  const [sourceId, setSourceId] = useState<string>('warehouse');
+  const [sourceId, setSourceId] = useState<string>('supplier');
   const [destId, setDestId] = useState<string>('');
   const [itemsToTransfer, setItemsToTransfer] = useState<{ itemId: string; quantity: number }[]>([]);
   const [selectedItemId, setSelectedItemId] = useState<string>('');
@@ -79,7 +81,7 @@ export default function AdminStockTransfer({
       setDestId(lockedDestinationId);
       return;
     }
-    const defaultDest = locations.find(loc => loc.id !== sourceId);
+    const defaultDest = locations.find(loc => loc.id !== sourceId && loc.id !== 'supplier');
     if (defaultDest) {
       setDestId(defaultDest.id);
     }
@@ -102,7 +104,7 @@ export default function AdminStockTransfer({
     if (!itemFull) return;
 
     // Check stock levels at source
-    const sourceStock = itemFull.quantities[sourceId] ?? 0;
+    const sourceStock = sourceId === 'supplier' ? Number.POSITIVE_INFINITY : itemFull.quantities[sourceId] ?? 0;
     const requestedQty = selectedQty + (existingIndex > -1 ? itemsToTransfer[existingIndex].quantity : 0);
 
     if (sourceStock < requestedQty) {
@@ -167,11 +169,20 @@ export default function AdminStockTransfer({
 
   const getSourceLocationObj = () => locations.find(l => l.id === sourceId);
   const getDestLocationObj = () => locations.find(l => l.id === destId);
-  const awaitingSourceTransfers = transfers.filter(
+  const awaitingDestinationTransfers = transfers.filter(
     (transfer) =>
       transfer.status === 'Approved - Awaiting Fulfillment' &&
-      transfer.sourceLocationId === currentUser.locationId
+      transfer.destinationLocationId === currentUser.locationId
   );
+  const historicalTransfers = allowCreate
+    ? transfers
+    : transfers.filter(
+        (transfer) =>
+          !(
+            transfer.status === 'Approved - Awaiting Fulfillment' &&
+            transfer.destinationLocationId === currentUser.locationId
+          )
+      );
 
   // Status Badge styling helper
   const getStatusBadge = (status: TransferStatus) => {
@@ -216,7 +227,7 @@ export default function AdminStockTransfer({
     const canApprove =
       allowApprovals && isPending && currentUser.role === 'Owner';
     const canComplete =
-      isAwaitingFulfillment && currentUser.locationId === trsf.sourceLocationId;
+      isAwaitingFulfillment && currentUser.locationId === trsf.destinationLocationId;
 
     return (
       <div key={trsf.id} className="p-3 bg-white border border-espresso-150 rounded-lg space-y-3">
@@ -226,7 +237,7 @@ export default function AdminStockTransfer({
               {trsf.id}
             </p>
             <div className="mt-1 text-xs font-bold text-espresso-950 leading-snug">
-              {sourceObj ? sourceObj.name : trsf.sourceLocationId}
+              {trsf.sourceLocationId === 'supplier' ? t('Tedarikçi') : sourceObj ? sourceObj.name : trsf.sourceLocationId}
               <ArrowRight className="inline-block w-3.5 h-3.5 mx-1 text-brand-terracotta" />
               {destObj ? destObj.name : trsf.destinationLocationId}
             </div>
@@ -295,19 +306,90 @@ export default function AdminStockTransfer({
             onClick={() => onUpdateTransferStatus(trsf.id, 'Approved & Completed', currentUser.name)}
             className="w-full min-h-[40px] text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg flex items-center justify-center gap-1 shadow-xs cursor-pointer"
           >
-            <Check className="w-3.5 h-3.5" /> Transfer Tamamlandı
+            <Check className="w-3.5 h-3.5" /> {t('Teslim Aldım')}
           </button>
         ) : (
           <div className="text-[10px] text-espresso-400 font-mono font-medium">
             {isPending
               ? 'Yönetici Onayı Bekliyor'
               : isAwaitingFulfillment
-                ? 'Kaynak Şubeye Bildirildi'
+                ? t('Teslimat Bekliyor')
                 : trsf.status === 'Declined'
                   ? 'Reddedildi'
                   : 'Tamamlandı'}
           </div>
         )}
+      </div>
+    );
+  };
+
+  const renderPendingDeliveryCard = (trsf: StockTransfer) => {
+    const sourceObj = locations.find(l => l.id === trsf.sourceLocationId);
+    const sourceName =
+      trsf.sourceLocationId === 'supplier'
+        ? t('Tedarikçi')
+        : sourceObj
+          ? sourceObj.name
+          : trsf.sourceLocationId;
+
+    return (
+      <div
+        key={`pending-${trsf.id}`}
+        className="bg-white border border-blue-200 rounded-xl p-4 shadow-xs space-y-4"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-blue-50 text-blue-800 border border-blue-200 text-[10px] font-mono font-bold uppercase">
+              <Truck className="w-3.5 h-3.5" />
+              {t('Teslimat Bekliyor')}
+            </span>
+            <h3 className="font-bold text-espresso-950 text-sm mt-2">
+              {sourceName}
+              <ArrowRight className="inline-block w-3.5 h-3.5 mx-1 text-brand-terracotta" />
+              {t('Bu Şube')}
+            </h3>
+            <p className="text-[10px] font-mono text-espresso-400 mt-1">
+              {new Date(trsf.createdAt).toLocaleString('tr-TR')}
+            </p>
+          </div>
+          <span className="text-[10px] font-mono text-espresso-500 bg-espresso-50 border border-espresso-100 rounded px-2 py-1">
+            {trsf.items.length} {t('ürün')}
+          </span>
+        </div>
+
+        <div className="space-y-2">
+          {trsf.items.map((item, index) => {
+            const itemFull = items.find(it => it.id === item.itemId);
+            return (
+              <div
+                key={`${trsf.id}-pending-${item.itemId}-${index}`}
+                className="flex items-center justify-between gap-3 rounded-lg bg-espresso-50/55 border border-espresso-100 px-3 py-2"
+              >
+                <span className="text-xs font-bold text-espresso-900 truncate">
+                  {itemFull ? itemFull.name : item.itemId}
+                </span>
+                <span className="text-xs font-mono font-bold text-espresso-950 whitespace-nowrap">
+                  {item.quantity} {itemFull?.unit || 'pcs'}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        {trsf.notes && (
+          <p className="text-[11px] text-espresso-500 italic border-t border-espresso-100 pt-3">
+            {t('Not:')} &ldquo;{trsf.notes}&rdquo;
+          </p>
+        )}
+
+        <button
+          type="button"
+          onClick={() => onUpdateTransferStatus(trsf.id, 'Approved & Completed', currentUser.name)}
+          className="w-full min-h-[44px] bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg flex items-center justify-center gap-2 shadow-xs cursor-pointer"
+        >
+          <Check className="w-4 h-4" />
+          {t('Teslim Aldım')}
+        </button>
       </div>
     );
   };
@@ -325,26 +407,32 @@ export default function AdminStockTransfer({
         </p>
       </div>
 
-      {awaitingSourceTransfers.length > 0 && (
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      {awaitingDestinationTransfers.length > 0 && (
+        <section className="bg-blue-50/70 border border-blue-200 rounded-xl p-4 space-y-4">
           <div className="flex items-start gap-3">
-            <div className="w-9 h-9 rounded-lg bg-white border border-blue-200 flex items-center justify-center shrink-0">
+            <div className="w-10 h-10 rounded-xl bg-white border border-blue-200 flex items-center justify-center shrink-0">
               <Truck className="w-5 h-5 text-blue-700" />
             </div>
             <div>
-              <p className="text-sm font-bold text-blue-950">
-                Kaynak şubenize düşen {awaitingSourceTransfers.length} onaylı transfer var.
-              </p>
+              <h3 className="text-sm font-bold text-blue-950">
+                {t('Şubenize gelen')} {awaitingDestinationTransfers.length} {t('teslimat bildirimi var.')}
+              </h3>
               <p className="text-xs text-blue-800 mt-0.5">
-                Ürünler gönderildiğinde aşağıdaki listeden “Transfer Tamamlandı” olarak işaretleyin.
+                {t('Ürünler geldiğinde aşağıdaki listeden “Teslim Aldım” olarak işaretleyin.')}
               </p>
             </div>
           </div>
-        </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {awaitingDestinationTransfers.map((transfer) =>
+              renderPendingDeliveryCard(transfer)
+            )}
+          </div>
+        </section>
       )}
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 sm:gap-6 items-start">
         {/* Left Card: Input Panel (Column: 7) */}
+        {allowCreate && (
         <div className="xl:col-span-7 bg-white rounded-xl border border-espresso-200 p-4 sm:p-5 shadow-xs">
           <div className="flex items-center gap-2 pb-3 border-b border-espresso-100 mb-4 sm:mb-5">
             <Truck className="w-5 h-5 text-brand-terracotta" />
@@ -370,7 +458,10 @@ export default function AdminStockTransfer({
                   }}
                   className="w-full min-h-[48px] px-3 py-2 rounded-lg border border-espresso-200 bg-white disabled:bg-espresso-50 text-espresso-900 text-base md:text-sm focus:outline-none focus:ring-2 focus:ring-brand-terracotta/30 focus:border-brand-terracotta"
                 >
-                  {locations.map(loc => (
+                  {!lockedSourceId && (
+                    <option value="supplier">{t('Tedarikçi')}</option>
+                  )}
+                  {locations.filter((loc) => loc.id !== 'supplier').map(loc => (
                     <option key={loc.id} value={loc.id}>
                       {loc.name} {loc.isWarehouse ? '(Merkez Depo)' : ''}
                     </option>
@@ -389,7 +480,7 @@ export default function AdminStockTransfer({
                   onChange={(e) => setDestId(e.target.value)}
                   className="w-full min-h-[48px] px-3 py-2 rounded-lg border border-espresso-200 bg-white disabled:bg-espresso-50 text-espresso-900 text-base md:text-sm focus:outline-none focus:ring-2 focus:ring-brand-terracotta/30 focus:border-brand-terracotta"
                 >
-                  {locations.filter(loc => loc.id !== sourceId).map(loc => (
+                  {locations.filter(loc => loc.id !== sourceId && loc.id !== 'supplier').map(loc => (
                     <option key={loc.id} value={loc.id}>
                       {loc.name}
                     </option>
@@ -417,10 +508,10 @@ export default function AdminStockTransfer({
                   >
                     <option value="">-- Ürün Seçin --</option>
                     {items.map(item => {
-                      const stockAtSource = item.quantities[sourceId] ?? 0;
+                      const stockAtSource = sourceId === 'supplier' ? null : item.quantities[sourceId] ?? 0;
                       return (
                         <option key={item.id} value={item.id}>
-                          {item.name} ({stockAtSource} {item.unit} mevcut)
+                          {item.name} {stockAtSource === null ? `(${t('tedarikçiden')})` : `(${stockAtSource} ${item.unit} ${t('mevcut')})`}
                         </option>
                       );
                     })}
@@ -470,8 +561,8 @@ export default function AdminStockTransfer({
                   {itemsToTransfer.map((itemDraft, index) => {
                     const itemObj = items.find(i => i.id === itemDraft.itemId);
                     if (!itemObj) return null;
-                    const originStock = itemObj.quantities[sourceId] ?? 0;
-                    const isInsufficient = originStock < itemDraft.quantity;
+                    const originStock = sourceId === 'supplier' ? null : itemObj.quantities[sourceId] ?? 0;
+                    const isInsufficient = originStock !== null && originStock < itemDraft.quantity;
 
                     return (
                       <div key={itemDraft.itemId} className="p-3 bg-white flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -482,7 +573,11 @@ export default function AdminStockTransfer({
                               {itemObj.category === 'Coffee Beans' ? 'Kahve' : itemObj.category === 'Dairy & Alternatives' ? 'Süt' : itemObj.category === 'Syrups' ? 'Şurup' : 'Karton/Bardak'}
                             </span>
                             <span className="text-[11px] text-espresso-500">
-                              Gönderende mevcut: <b className="font-mono text-espresso-800">{originStock} {itemObj.unit}</b>
+                              {sourceId === 'supplier' ? t('Tedarikçiden gelecek') : (
+                                <>
+                                  {t('Gönderende mevcut:')} <b className="font-mono text-espresso-800">{originStock} {itemObj.unit}</b>
+                                </>
+                              )}
                             </span>
                           </div>
                           {isInsufficient && (
@@ -546,7 +641,7 @@ export default function AdminStockTransfer({
             {/* Confirm Actions */}
             <div className="pt-4 border-t border-espresso-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div className="text-xs text-espresso-600">
-                Talep Durumu: <span className="font-bold text-amber-600 font-mono">YÖNETİCİ ONAYI BEKLİYOR</span>
+                {t('Gönderim Durumu:')} <span className="font-bold text-blue-700 font-mono">{t('TESLİMAT BEKLİYOR')}</span>
               </div>
               <button
                 type="submit"
@@ -557,9 +652,11 @@ export default function AdminStockTransfer({
             </div>
           </form>
         </div>
+        )}
 
         {/* Right Card: Running Summary & Checklist (Column: 5) */}
-        <div className="xl:col-span-5 space-y-4">
+        <div className={`${allowCreate ? 'xl:col-span-5' : 'xl:col-span-12'} space-y-4`}>
+          {allowCreate && (
           <div className="bg-brand-cream border border-espresso-300 rounded-xl p-4 shadow-xs space-y-4 font-sans">
             <div className="flex items-center gap-1.5 pb-2 border-b border-espresso-250 font-sans">
               <ClipboardList className="w-5 h-5 text-espresso-800" />
@@ -569,7 +666,7 @@ export default function AdminStockTransfer({
             <div className="space-y-3 text-xs">
               <div className="flex justify-between items-baseline">
                 <span className="font-mono text-espresso-500">KAYNAK:</span>
-                <span className="font-bold text-espresso-900">{getSourceLocationObj()?.name || "Belirtilmedi"}</span>
+                <span className="font-bold text-espresso-900">{sourceId === 'supplier' ? t('Tedarikçi') : getSourceLocationObj()?.name || "Belirtilmedi"}</span>
               </div>
               <div className="flex justify-between items-baseline">
                 <span className="font-mono text-espresso-500">HEDEF:</span>
@@ -585,11 +682,12 @@ export default function AdminStockTransfer({
               </div>
 
               <div className="pt-3 border-t border-espresso-250 text-[11px] text-espresso-500 leading-relaxed">
-                <p className="font-bold uppercase text-espresso-700 tracking-wider mb-1">Onay Kuralları:</p>
-                <b>{currentUser.role}</b> olarak transfer kaydı oluşturuyorsunuz. Owner onayından sonra talep kaynak şubeye bildirim gibi düşer; kaynak şube “Transfer tamamlandı” dediğinde stok bakiyeleri işlenir.
+                <p className="font-bold uppercase text-espresso-700 tracking-wider mb-1">{t('Teslimat Kuralları:')}</p>
+                {t('Admin gönderimi hedef şubenin ekranına düşer. Ürün geldiğinde hedef şube “Teslim Aldım” dediğinde stok bakiyeleri işlenir.')}
               </div>
             </div>
           </div>
+          )}
 
           <div className="bg-white border border-espresso-200 rounded-xl shadow-xs overflow-hidden">
             <div className="p-4 border-b border-espresso-100 bg-espresso-50/50 flex items-center justify-between gap-3">
@@ -600,17 +698,17 @@ export default function AdminStockTransfer({
                 </h3>
               </div>
               <span className="font-mono text-[10px] text-espresso-500 bg-white border border-espresso-200 px-2 py-1 rounded shadow-xs shrink-0">
-                {transfers.length} kayıt
+                {historicalTransfers.length} kayıt
               </span>
             </div>
 
-            {transfers.length === 0 ? (
+            {historicalTransfers.length === 0 ? (
               <div className="p-6 text-center text-espresso-500 font-sans text-xs">
                 Kayıtlı transfer işlemi bulunmuyor.
               </div>
             ) : (
               <div className="p-3 space-y-3 max-h-[520px] overflow-y-auto">
-                {transfers.map((trsf) => renderTransferCard(trsf))}
+                {historicalTransfers.map((trsf) => renderTransferCard(trsf))}
               </div>
             )}
           </div>

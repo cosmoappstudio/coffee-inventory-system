@@ -30,6 +30,7 @@ export default function OpsTransfersPage() {
       currentUser={employee}
       lockedDestinationId={employee.locationId}
       allowApprovals={false}
+      allowCreate={false}
       onCreateTransfer={createTransfer}
       onUpdateTransferStatus={updateTransferStatus}
     />

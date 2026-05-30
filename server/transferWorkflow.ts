@@ -16,6 +16,7 @@ type EmployeeRow = {
   id: string;
   role: 'Owner' | 'Location Manager' | 'Barista';
   location_id: string | null;
+  employee_locations?: { location_id: string }[];
 };
 
 type TransferRow = {
@@ -38,12 +39,21 @@ async function currentEmployee(
 
   const { data, error } = await userClient
     .from('employees')
-    .select('id, role, location_id')
+    .select('id, role, location_id, employee_locations(location_id)')
     .eq('auth_id', user.id)
     .single();
 
   if (error || !data) return null;
   return data as EmployeeRow;
+}
+
+function employeeHasLocation(employee: EmployeeRow, locationId: string): boolean {
+  return (
+    employee.location_id === locationId ||
+    (employee.employee_locations ?? []).some(
+      (assignment) => assignment.location_id === locationId
+    )
+  );
 }
 
 async function fetchTransfer(
@@ -65,14 +75,6 @@ async function completeInventoryMovement(
   transfer: TransferRow
 ): Promise<void> {
   for (const line of transfer.transfer_items) {
-    const { data: sourceRow, error: sourceError } = await adminClient
-      .from('inventory')
-      .select('quantity')
-      .eq('item_id', line.item_id)
-      .eq('location_id', transfer.source_location_id)
-      .single();
-    if (sourceError) throw sourceError;
-
     const { data: destinationRow, error: destinationError } = await adminClient
       .from('inventory')
       .select('quantity')
@@ -82,15 +84,25 @@ async function completeInventoryMovement(
     if (destinationError) throw destinationError;
 
     const quantity = Number(line.quantity);
-    const sourceQuantity = Math.max(0, Number(sourceRow.quantity) - quantity);
     const destinationQuantity = Number(destinationRow.quantity) + quantity;
 
-    const { error: sourceUpdateError } = await adminClient
-      .from('inventory')
-      .update({ quantity: sourceQuantity })
-      .eq('item_id', line.item_id)
-      .eq('location_id', transfer.source_location_id);
-    if (sourceUpdateError) throw sourceUpdateError;
+    if (transfer.source_location_id !== 'supplier') {
+      const { data: sourceRow, error: sourceError } = await adminClient
+        .from('inventory')
+        .select('quantity')
+        .eq('item_id', line.item_id)
+        .eq('location_id', transfer.source_location_id)
+        .single();
+      if (sourceError) throw sourceError;
+
+      const sourceQuantity = Math.max(0, Number(sourceRow.quantity) - quantity);
+      const { error: sourceUpdateError } = await adminClient
+        .from('inventory')
+        .update({ quantity: sourceQuantity })
+        .eq('item_id', line.item_id)
+        .eq('location_id', transfer.source_location_id);
+      if (sourceUpdateError) throw sourceUpdateError;
+    }
 
     const { error: destinationUpdateError } = await adminClient
       .from('inventory')
@@ -143,11 +155,11 @@ export async function updateTransferWorkflowStatus(
       };
     }
 
-    if (employee.location_id !== transfer.source_location_id) {
+    if (!employeeHasLocation(employee, transfer.destination_location_id)) {
       return {
         ok: false,
         status: 403,
-        error: 'Transferi sadece kaynak şube tamamlayabilir.',
+        error: 'Transferi sadece hedef şube teslim alabilir.',
       };
     }
 

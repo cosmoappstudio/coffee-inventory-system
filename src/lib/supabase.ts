@@ -36,4 +36,5 @@ export type EmployeeRow = {
   location_id: string | null;
   status: 'Active' | 'On Leave' | 'Inactive';
   email: string;
+  employee_locations?: { location_id: string }[];
 };
